@@ -17,12 +17,19 @@ limitations under the License.
 package builder
 
 import (
+	"os"
+	"io/ioutil"
+	"fmt"
+
 	"github.com/golang/glog"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/aws"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/azure"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/gce"
-	"os"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/kubemark"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	kube_client "k8s.io/kubernetes/pkg/client/clientset_generated/clientset"
 )
 
 // CloudProviderBuilder builds a cloud provider from all the necessary parameters including the name of a cloud provider e.g. aws, gce
@@ -113,6 +120,37 @@ func (b CloudProviderBuilder) Build(discoveryOpts cloudprovider.NodeGroupDiscove
 		cloudProvider, err = azure.BuildAzureCloudProvider(azureManager, nodeGroupsFlag)
 		if err != nil {
 			glog.Fatalf("Failed to create Azure cloud provider: %v", err)
+		}
+	}
+
+	if b.cloudProviderFlag == kubemark.ProviderName {
+		var kubemarkManager *kubemark.KubemarkManager
+		externalConfig, err := rest.InClusterConfig()
+		if err != nil {
+			glog.Fatalf("Failed to get kubeclient config for external cluster: %v", err)
+		}
+
+		files, _ := ioutil.ReadDir("/kubeconfig")
+			for _, f := range files {
+			fmt.Println(f.Name())
+		}
+		kubemarkConfig, err := clientcmd.BuildConfigFromFlags("", "/kubeconfig/cluster_autoscaler.kubeconfig")
+		if err != nil {
+			glog.Fatalf("Failed to get kubeclient config for kubemark cluster: %v", err)
+		}
+
+		externalClient := kube_client.NewForConfigOrDie(externalConfig)
+		kubemarkClient := kube_client.NewForConfigOrDie(kubemarkConfig)
+
+		stop := make(chan struct{})
+		kubemarkManager, err = kubemark.CreateKubemarkManager(externalClient, kubemarkClient, stop)
+		if err != nil {
+			glog.Fatalf("Failed to create Kubemark cloud provider: %v", err)
+		}
+
+		cloudProvider, err = kubemark.BuildKubemarkCloudProvider(kubemarkManager, nodeGroupsFlag)
+		if err != nil {
+			glog.Fatalf("Failed to create Kubemark cloud provider: %v", err)
 		}
 	}
 
