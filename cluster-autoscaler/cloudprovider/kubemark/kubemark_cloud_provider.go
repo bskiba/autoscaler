@@ -168,10 +168,11 @@ func (nodeGroup *NodeGroup) IncreaseSize(delta int) error {
 	if err != nil {
 		return err
 	}
-	if int(size)+delta > nodeGroup.MaxSize() {
+	newSize := int(size)+delta
+	if newSize > nodeGroup.MaxSize() {
 		return fmt.Errorf("size increase too large - desired:%d max:%d", int(size)+delta, nodeGroup.MaxSize())
 	}
-	return nodeGroup.kubemarkManager.AddNodesToNodeGroup(nodeGroup, delta)
+	return nodeGroup.kubemarkManager.SetNodeGroupSize(nodeGroup, newSize)
 }
 
 // TargetSize returns the current TARGET size of the node group. It is possible that the
@@ -196,11 +197,12 @@ func (nodeGroup *NodeGroup) DecreaseTargetSize(delta int) error {
 	if err != nil {
 		return err
 	}
-	if int(size)+delta < len(nodes) {
+	newSize := int(size)+delta
+	if newSize < len(nodes) {
 		return fmt.Errorf("attempt to delete existing nodes targetSize:%d delta:%d existingNodes: %d",
 			size, delta, len(nodes))
 	}
-	return nodeGroup.kubemarkManager.RemoveNodesFromNodeGroup(nodeGroup, -delta)
+	return nodeGroup.kubemarkManager.SetNodeGroupSize(nodeGroup, newSize)
 }
 
 // TemplateNodeInfo returns a node template for this node group.
