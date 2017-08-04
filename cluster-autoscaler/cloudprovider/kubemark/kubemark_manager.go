@@ -94,6 +94,8 @@ func CreateKubemarkManager(externalClient kube_client.Interface, kubemarkClient 
 	})
 
 	manager.kubemarkCluster.nodesToDelete = make(map[string]bool)
+	
+	rand.Seed(time.Now().UTC().UnixNano())
 
 	nodeTemplate, err := manager.getNodeTemplate()
 	if err != nil {
@@ -252,7 +254,7 @@ func (kubemarkManager *KubemarkManager) addNodeToNodeGroup(nodeGroup *NodeGroup)
 		return err
 	}
 	node := templateCopy.(*apiv1.ReplicationController)
-	node.Name = nodeGroup.Name + "-" + fmt.Sprint(rand.Intn(1000))
+	node.Name = nodeGroup.Name + "-" + fmt.Sprint(rand.Int63())
 	node.Labels = map[string]string{nodeGroupLabel: nodeGroup.Name, "name": node.Name, kindLabel: hollowNodeName}
 	node.Spec.Template.Labels = node.Labels
 	_, err = kubemarkManager.externalCluster.client.CoreV1().ReplicationControllers(node.Namespace).Create(node)
