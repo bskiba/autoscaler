@@ -42,9 +42,12 @@ const (
 
 // KubemarkManager
 type KubemarkManager struct {
-	nodeTemplate    *apiv1.ReplicationController
-	externalCluster ExternalCluster
-	kubemarkCluster KubemarkCluster
+	nodeTemplate      *apiv1.ReplicationController
+	externalCluster   ExternalCluster
+	kubemarkCluster   KubemarkCluster
+	createNodeQueue   chan *apiv1.ReplicationController
+	nodeGroupSizeLock sync.Mutex
+	nodeGroupSize     map[string]int
 }
 
 type ExternalCluster struct {
@@ -75,6 +78,9 @@ func CreateKubemarkManager(externalClient kube_client.Interface, kubemarkClient 
 			nodesToDelete:     make(map[string]bool),
 			nodesToDeleteLock: sync.Mutex{},
 		},
+		createNodeQueue:   make(chan *apiv1.ReplicationController),
+		nodeGroupSizeLock: sync.Mutex{},
+		nodeGroupSize:     make(map[string]int),
 	}
 
 	externalInformerFactory.Start(stop)
@@ -94,7 +100,9 @@ func CreateKubemarkManager(externalClient kube_client.Interface, kubemarkClient 
 	})
 
 	manager.kubemarkCluster.nodesToDelete = make(map[string]bool)
-	
+
+	go manager.runReplicationControllerCreation(stop)
+
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	nodeTemplate, err := manager.getNodeTemplate()
@@ -124,8 +132,6 @@ func (kubemarkManager *KubemarkManager) GetNodeGroupForNode(nodeName string) (st
 	for _, podObj := range kubemarkManager.externalCluster.podLister.GetStore().List() {
 		pod := podObj.(*apiv1.Pod)
 		if pod.ObjectMeta.Name == nodeName {
-			//glog.Infof("returning pod Label %q", pod.ObjectMeta.Labels[nodeGroupLabel])
-			//glog.Infof("Pod: %+v", pod)
 			nodeGroup, ok := pod.ObjectMeta.Labels[nodeGroupLabel]
 			if ok {
 				return nodeGroup, nil
@@ -144,13 +150,15 @@ func (kubemarkManager *KubemarkManager) DeleteNode(nodeGroup *NodeGroup, node st
 				return fmt.Errorf("Can't delete node %s from nodegroup %s. Node is not in nodegroup.", node, nodeGroup.Name)
 			}
 			policy := metav1.DeletePropagationForeground
+			kubemarkManager.nodeGroupSizeLock.Lock()
+			defer kubemarkManager.nodeGroupSizeLock.Unlock()
 			err := kubemarkManager.externalCluster.client.CoreV1().ReplicationControllers(namespaceKubemark).Delete(
 				pod.ObjectMeta.Labels["name"],
 				&metav1.DeleteOptions{PropagationPolicy: &policy})
+			kubemarkManager.nodeGroupSize[nodeGroup.Name]--
 			if err != nil {
 				return err
 			}
-			// TODO(bskiba): This is ugly, change this
 			glog.Infof("Marking node %s for deletion.", node)
 			kubemarkManager.kubemarkCluster.markNodeForDeletion(node)
 			return nil
@@ -169,7 +177,6 @@ func (kubemarkManager *KubemarkManager) GetNodesForNodegroup(nodeGroup *NodeGrou
 			result = append(result, pod.ObjectMeta.Name)
 		}
 	}
-	glog.Infof("%#v", result)
 	return result, nil
 }
 
@@ -182,6 +189,12 @@ func (kubemarkManager *KubemarkManager) GetNodeGroupSize(nodeGroup *NodeGroup) (
 		}
 	}
 	return size, nil
+}
+
+func (kubemarkManager *KubemarkManager) GetNodeGroupTargetSize(nodeGroup *NodeGroup) (int, error) {
+	kubemarkManager.nodeGroupSizeLock.Lock()
+	defer kubemarkManager.nodeGroupSizeLock.Unlock()
+	return kubemarkManager.nodeGroupSize[nodeGroup.Name], nil
 }
 
 func (kubemarkManager *KubemarkManager) AddNodesToNodeGroup(nodeGroup *NodeGroup, delta int) error {
@@ -257,8 +270,27 @@ func (kubemarkManager *KubemarkManager) addNodeToNodeGroup(nodeGroup *NodeGroup)
 	node.Name = nodeGroup.Name + "-" + fmt.Sprint(rand.Int63())
 	node.Labels = map[string]string{nodeGroupLabel: nodeGroup.Name, "name": node.Name, kindLabel: hollowNodeName}
 	node.Spec.Template.Labels = node.Labels
-	_, err = kubemarkManager.externalCluster.client.CoreV1().ReplicationControllers(node.Namespace).Create(node)
-	return err
+	kubemarkManager.nodeGroupSizeLock.Lock()
+	defer kubemarkManager.nodeGroupSizeLock.Unlock()
+	kubemarkManager.nodeGroupSize[nodeGroup.Name]++
+	kubemarkManager.createNodeQueue <- node
+	return nil
+}
+
+func (kubemarkManager *KubemarkManager) runReplicationControllerCreation(stop <-chan struct{}) {
+
+	for {
+		select {
+		case node := <-kubemarkManager.createNodeQueue:
+			_, err := kubemarkManager.externalCluster.client.CoreV1().ReplicationControllers(node.Namespace).Create(node)
+			if err != nil {
+				glog.Infof("Failed to create node %s: %v", node.Name, err)
+				kubemarkManager.createNodeQueue <- node
+			}
+		case <-stop:
+			return
+		}
+	}
 }
 
 // getNodeTemplate returns the template for hollow node replication controllers

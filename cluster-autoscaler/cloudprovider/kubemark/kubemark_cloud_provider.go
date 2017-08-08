@@ -97,7 +97,6 @@ type NodeGroup struct {
 
 // NodeGroupForNode returns the node group for the given node.
 func (kubemark *KubemarkCloudProvider) NodeGroupForNode(node *apiv1.Node) (cloudprovider.NodeGroup, error) {
-	glog.Infof("Getting node group for node %+v", node)
 	nodeGroupName, err := kubemark.kubemarkManager.GetNodeGroupForNode(node.ObjectMeta.Name)
 	if err != nil {
 		return nil, err
@@ -177,7 +176,7 @@ func (nodeGroup *NodeGroup) IncreaseSize(delta int) error {
 // TargetSize returns the current TARGET size of the node group. It is possible that the
 // number is different from the number of nodes registered in Kuberentes.
 func (nodeGroup *NodeGroup) TargetSize() (int, error) {
-	size, err := nodeGroup.kubemarkManager.GetNodeGroupSize(nodeGroup)
+	size, err := nodeGroup.kubemarkManager.GetNodeGroupTargetSize(nodeGroup)
 	return int(size), err
 }
 
@@ -220,8 +219,6 @@ func buildNodeGroup(value string, kubemarkManager *KubemarkManager) (*NodeGroup,
 		minSize:         spec.MinSize,
 		maxSize:         spec.MaxSize,
 	}
-
-	glog.Infof("Returning nodegroup: %+v", nodeGroup)
 
 	return nodeGroup, nil
 }

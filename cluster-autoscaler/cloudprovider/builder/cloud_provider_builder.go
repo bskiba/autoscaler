@@ -18,8 +18,6 @@ package builder
 
 import (
 	"os"
-	"io/ioutil"
-	"fmt"
 
 	"github.com/golang/glog"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
@@ -124,16 +122,13 @@ func (b CloudProviderBuilder) Build(discoveryOpts cloudprovider.NodeGroupDiscove
 	}
 
 	if b.cloudProviderFlag == kubemark.ProviderName {
+		glog.Infof("Building kubemark cloud provider.")
 		var kubemarkManager *kubemark.KubemarkManager
 		externalConfig, err := rest.InClusterConfig()
 		if err != nil {
 			glog.Fatalf("Failed to get kubeclient config for external cluster: %v", err)
 		}
 
-		files, _ := ioutil.ReadDir("/kubeconfig")
-			for _, f := range files {
-			fmt.Println(f.Name())
-		}
 		kubemarkConfig, err := clientcmd.BuildConfigFromFlags("", "/kubeconfig/cluster_autoscaler.kubeconfig")
 		if err != nil {
 			glog.Fatalf("Failed to get kubeclient config for kubemark cluster: %v", err)
