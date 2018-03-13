@@ -332,17 +332,37 @@ func parseKubeReserved(kubeReserved string) (apiv1.ResourceList, error) {
 }
 
 func extractLabelsFromKubeEnv(kubeEnv string) (map[string]string, error) {
-	labels, err := extractFromKubeEnv(kubeEnv, "NODE_LABELS")
+	// In v1.10+, labels are only exposed for the autoscaler via AUTOSCALER_ENV_VARS
+	// see kubernetes/kubernetes#61119. We try AUTOSCALER_ENV_VARS first, then
+	// fall back to the old way.
+	labels, err := extractAutoscalerVarFromKubeEnv(kubeEnv, "node_labels")
 	if err != nil {
-		return nil, err
+		glog.Infof("node_labels not found via AUTOSCALER_ENV_VARS, will try NODE_LABELS")
+		labels, err := extractFromKubeEnv(kubeEnv, "NODE_LABELS")
+		if err != nil {
+			return nil, err
+		}
+		return parseKeyValueListToMap(labels)
 	}
 	return parseKeyValueListToMap(labels)
 }
 
 func extractTaintsFromKubeEnv(kubeEnv string) ([]apiv1.Taint, error) {
-	taints, err := extractFromKubeEnv(kubeEnv, "NODE_TAINTS")
+	// In v1.10+, taints are only exposed for the autoscaler via AUTOSCALER_ENV_VARS
+	// see kubernetes/kubernetes#61119. We try AUTOSCALER_ENV_VARS first, then
+	// fall back to the old way.
+	taints, err := extractAutoscalerVarFromKubeEnv(kubeEnv, "node_taints")
 	if err != nil {
-		return nil, err
+		glog.Infof("node_taints not found via AUTOSCALER_ENV_VARS, will try NODE_TAINTS")
+		taints, err := extractFromKubeEnv(kubeEnv, "NODE_TAINTS")
+		if err != nil {
+			return nil, err
+		}
+		taintMap, err := parseKeyValueListToMap(taints)
+		if err != nil {
+			return nil, err
+		}
+		return buildTaints(taintMap)
 	}
 	taintMap, err := parseKeyValueListToMap(taints)
 	if err != nil {
@@ -352,19 +372,55 @@ func extractTaintsFromKubeEnv(kubeEnv string) ([]apiv1.Taint, error) {
 }
 
 func extractKubeReservedFromKubeEnv(kubeEnv string) (string, error) {
-	kubeletArgs, err := extractFromKubeEnv(kubeEnv, "KUBELET_TEST_ARGS")
+	// In v1.10+, kube-reserved is only exposed for the autoscaler via AUTOSCALER_ENV_VARS
+	// see kubernetes/kubernetes#61119. We try AUTOSCALER_ENV_VARS first, then
+	// fall back to the old way.
+	kubeReserved, err := extractAutoscalerVarFromKubeEnv(kubeEnv, "kube_reserved")
 	if err != nil {
-		return "", err
-	}
-	resourcesRegexp := regexp.MustCompile(`--kube-reserved=([^ ]+)`)
+		glog.Infof("kube_reserved not found via AUTOSCALER_ENV_VARS, will try kube-reserved in KUBELET_TEST_ARGS")
+		kubeletArgs, err := extractFromKubeEnv(kubeEnv, "KUBELET_TEST_ARGS")
+		if err != nil {
+			return "", err
+		}
+		resourcesRegexp := regexp.MustCompile(`--kube-reserved=([^ ]+)`)
 
-	for _, value := range kubeletArgs {
-		matches := resourcesRegexp.FindStringSubmatch(value)
-		if len(matches) > 1 {
-			return matches[1], nil
+		for _, value := range kubeletArgs {
+			matches := resourcesRegexp.FindStringSubmatch(value)
+			if len(matches) > 1 {
+				return matches[1], nil
+			}
+		}
+		return "", fmt.Errorf("kube-reserved not in kubelet args in kube-env: %q", strings.Join(kubeletArgs, " "))
+	}
+	return kubeReserved[0], nil
+}
+
+func extractAutoscalerVarFromKubeEnv(kubeEnv, name string) ([]string, error) {
+	const autoscalerVars = "AUTOSCALER_ENV_VARS"
+	autoscalerVals, err := extractFromKubeEnv(kubeEnv, autoscalerVars)
+	if err != nil {
+		return nil, err
+	}
+	result := []string{}
+	for _, val := range autoscalerVals {
+		for _, v := range strings.Split(val, ";") {
+			v = strings.Trim(v, " ")
+			if len(v) == 0 {
+				continue
+			}
+			items := strings.SplitN(v, "=", 2)
+			if len(items) != 2 {
+				return nil, fmt.Errorf("malformed var %s", v)
+			}
+			if strings.Trim(items[0], " ") == name {
+				result = append(result, strings.Trim(items[1], " \"'"))
+			}
 		}
 	}
-	return "", fmt.Errorf("kube-reserved not in kubelet args in kube-env: %q", strings.Join(kubeletArgs, " "))
+	if len(result) == 0 {
+		return nil, fmt.Errorf("var %s not found in %s: %v", name, autoscalerVars, autoscalerVals)
+	}
+	return result, nil
 }
 
 func extractFromKubeEnv(kubeEnv, resource string) ([]string, error) {
