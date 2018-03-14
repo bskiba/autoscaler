@@ -449,10 +449,13 @@ func parseKeyValueListToMap(values []string) (map[string]string, error) {
 	for _, value := range values {
 		for _, val := range strings.Split(value, ",") {
 			valItems := strings.SplitN(val, "=", 2)
-			if len(valItems) != 2 {
+			if len(valItems) == 2 {
+				result[valItems[0]] = valItems[1]
+			} else if len(valItems) == 1 && len(valItems[0]) == 0 {
+				glog.V(5).Info("empty key-value list")
+			} else {
 				return nil, fmt.Errorf("error while parsing kube env value: %s", val)
 			}
-			result[valItems[0]] = valItems[1]
 		}
 	}
 	return result, nil
