@@ -331,27 +331,6 @@ func TestExtractLabelsFromKubeEnv(t *testing.T) {
 }
 
 func TestExtractTaintsFromKubeEnv(t *testing.T) {
-	cases := []struct {
-		desc string
-		env  string
-	}{
-		{
-			desc: "from NODE_TAINTS",
-			env: "ENABLE_NODE_PROBLEM_DETECTOR: 'daemonset'\n" +
-				"NODE_LABELS: a=b,c=d,cloud.google.com/gke-nodepool=pool-3,cloud.google.com/gke-preemptible=true\n" +
-				"DNS_SERVER_IP: '10.0.0.10'\n" +
-				"NODE_TAINTS: 'dedicated=ml:NoSchedule,test=dev:PreferNoSchedule,a=b:c'\n",
-		},
-		{
-			desc: "from AUTOSCALER_ENV_VARS.node_taints",
-			env: "ENABLE_NODE_PROBLEM_DETECTOR: 'daemonset'\n" +
-				"DNS_SERVER_IP: '10.0.0.10'\n" +
-				"AUTOSCALER_ENV_VARS: node_labels=a=b,c=d,cloud.google.com/gke-nodepool=pool-3,cloud.google.com/gke-preemptible=true;" +
-				"node_taints='dedicated=ml:NoSchedule,test=dev:PreferNoSchedule,a=b:c';" +
-				"kube_reserved=cpu=1000m,memory=300000Mi\n",
-		},
-	}
-
 	expectedTaints := makeTaintSet([]apiv1.Taint{
 		{
 			Key:    "dedicated",
@@ -370,12 +349,43 @@ func TestExtractTaintsFromKubeEnv(t *testing.T) {
 		},
 	})
 
+	cases := []struct {
+		desc           string
+		env            string
+		expectedTaints map[apiv1.Taint]bool
+	}{
+		{
+			desc: "from NODE_TAINTS",
+			env: "ENABLE_NODE_PROBLEM_DETECTOR: 'daemonset'\n" +
+				"NODE_LABELS: a=b,c=d,cloud.google.com/gke-nodepool=pool-3,cloud.google.com/gke-preemptible=true\n" +
+				"DNS_SERVER_IP: '10.0.0.10'\n" +
+				"NODE_TAINTS: 'dedicated=ml:NoSchedule,test=dev:PreferNoSchedule,a=b:c'\n",
+			expectedTaints: expectedTaints,
+		},
+		{
+			desc: "from AUTOSCALER_ENV_VARS.node_taints",
+			env: "ENABLE_NODE_PROBLEM_DETECTOR: 'daemonset'\n" +
+				"DNS_SERVER_IP: '10.0.0.10'\n" +
+				"AUTOSCALER_ENV_VARS: node_labels=a=b,c=d,cloud.google.com/gke-nodepool=pool-3,cloud.google.com/gke-preemptible=true;" +
+				"node_taints='dedicated=ml:NoSchedule,test=dev:PreferNoSchedule,a=b:c';" +
+				"kube_reserved=cpu=1000m,memory=300000Mi\n",
+			expectedTaints: expectedTaints,
+		}, {
+			desc: "from empty AUTOSCALER_ENV_VARS.node_taints",
+			env: "ENABLE_NODE_PROBLEM_DETECTOR: 'daemonset'\n" +
+				"DNS_SERVER_IP: '10.0.0.10'\n" +
+				"AUTOSCALER_ENV_VARS: node_labels=a=b,c=d,cloud.google.com/gke-nodepool=pool-3,cloud.google.com/gke-preemptible=true;" +
+				"node_taints=\n",
+			expectedTaints: makeTaintSet([]apiv1.Taint{}),
+		},
+	}
+
 	for _, c := range cases {
 		t.Run(c.desc, func(t *testing.T) {
 			taints, err := extractTaintsFromKubeEnv(c.env)
 			assert.Nil(t, err)
-			assert.Equal(t, 3, len(taints))
-			assert.Equal(t, expectedTaints, makeTaintSet(taints))
+			assert.Equal(t, len(c.expectedTaints), len(taints))
+			assert.Equal(t, c.expectedTaints, makeTaintSet(taints))
 		})
 	}
 
