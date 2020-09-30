@@ -26,7 +26,11 @@ spec:
         runAsUser: 65534 # nobody
       containers:
         - name: updater
-          image: us.gcr.io/k8s-artifacts-prod/autoscaling/vpa-updater:0.8.1
+<<<<<<< HEAD
+          image: k8s.gcr.io/autoscaling/vpa-updater:0.8.1
+=======
+          image: k8s.gcr.io/autoscaling/vpa-updater:0.8.0
+>>>>>>> 23ad319cc (Swith back to k8s.gcr.io vanity domain)
           imagePullPolicy: Always
           resources:
             limits:
