@@ -448,10 +448,7 @@ func (a *StaticAutoscaler) RunOnce(currentTime time.Time) caerrors.AutoscalerErr
 		return nil
 	}
 
-	if deletedNodes := a.deleteCreatedNodesWithErrors(); deletedNodes {
-		klog.V(0).Infof("Some nodes that failed to create were removed, skipping iteration")
-		return nil
-	}
+	a.deleteCreatedNodesWithErrors()
 
 	// Check if there has been a constant difference between the number of nodes in k8s and
 	// the number of nodes on the cloud provider side.
@@ -831,7 +828,7 @@ func toNodes(unregisteredNodes []clusterstate.UnregisteredNode) []*apiv1.Node {
 	return nodes
 }
 
-func (a *StaticAutoscaler) deleteCreatedNodesWithErrors() bool {
+func (a *StaticAutoscaler) deleteCreatedNodesWithErrors() {
 	// We always schedule deleting of incoming errornous nodes
 	// TODO[lukaszos] Consider adding logic to not retry delete every loop iteration
 	nodeGroups := a.nodeGroupsById()
@@ -874,7 +871,10 @@ func (a *StaticAutoscaler) deleteCreatedNodesWithErrors() bool {
 		}
 	}
 
-	return deletedAny
+	if deletedAny {
+		klog.V(0).Infof("Some nodes that failed to create were removed, recalculating cluster state.")
+		a.clusterStateRegistry.Recalculate()
+	}
 }
 
 // instancesToNodes returns a list of fake nodes with just names populated,
